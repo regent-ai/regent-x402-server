@@ -129,6 +129,8 @@ export interface MerchantExecutorOptions {
   assetName?: string;
   explorerUrl?: string;
   chainId?: number;
+  description?: string;
+  outputSchema?: any;
 }
 
 export interface VerifyResult {
@@ -156,6 +158,7 @@ export class MerchantExecutor {
   private readonly network: Network;
   private readonly assetName: string;
   private readonly chainId?: number;
+  private readonly outputSchema?: any;
 
   constructor(options: MerchantExecutorOptions) {
     const builtinConfig = BUILT_IN_NETWORKS[
@@ -192,7 +195,7 @@ export class MerchantExecutor {
       payTo: options.payToAddress,
       maxAmountRequired: this.getAtomicAmount(options.price),
       resource: options.resourceUrl || 'https://merchant.local/process',
-      description: 'AI request processing service',
+      description: options.description || 'Paid service',
       mimeType: 'application/json',
       maxTimeoutSeconds: 600,
       extra: {
@@ -200,6 +203,8 @@ export class MerchantExecutor {
         version: '2',
       },
     };
+
+    this.outputSchema = options.outputSchema;
 
     this.mode =
       options.settlementMode ??
@@ -261,9 +266,13 @@ export class MerchantExecutor {
   }
 
   createPaymentRequiredResponse() {
+    const accept: any = { ...this.requirements };
+    if (this.outputSchema) {
+      accept.outputSchema = this.outputSchema;
+    }
     return {
       x402Version: 1,
-      accepts: [this.requirements],
+      accepts: [accept],
       error: 'Payment required for service',
     };
   }

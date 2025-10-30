@@ -107,6 +107,50 @@ const merchantOptionsMint: MerchantExecutorOptions = {
   assetName: ASSET_NAME,
   explorerUrl: EXPLORER_URL,
   chainId: CHAIN_ID,
+  description: 'Mint 1 ERC-721 to the verified payer (Base)',
+  outputSchema: {
+    input: {
+      type: 'http',
+      method: 'POST',
+      bodyType: 'json',
+      bodyFields: {
+        message: {
+          type: 'object',
+          required: true,
+          description: 'A2A message with x402 metadata',
+          properties: {
+            metadata: {
+              type: 'object',
+              required: true,
+              properties: {
+                'x402.payment.status': {
+                  type: 'string',
+                  enum: ['payment-submitted'],
+                  description: 'Must be set when submitting signed payment payload',
+                },
+                'x402.payment.payload': {
+                  type: 'object',
+                  required: true,
+                  description: 'x402 exact scheme payload (EIP-3009 authorization + signature)'
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    output: {
+      success: 'boolean',
+      payer: 'string',
+      mintTxHash: 'string',
+      tokenUri: 'string',
+      settlement: {
+        success: 'boolean',
+        network: 'string',
+        transaction: 'string'
+      }
+    }
+  }
 };
 
 const merchantExecutorMint = new MerchantExecutor(merchantOptionsMint);
