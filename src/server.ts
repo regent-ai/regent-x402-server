@@ -211,11 +211,7 @@ app.post('/mint', async (req, res) => {
     if (!paymentPayload || paymentStatus !== 'payment-submitted') {
       const paymentRequired = merchantExecutorMint.createPaymentRequiredResponse();
       console.log('💰 Payment required for mint');
-      return res.status(402).json({
-        success: false,
-        error: 'Payment Required',
-        required: paymentRequired,
-      });
+      return res.status(402).json(paymentRequired);
     }
 
     const verifyResult = await merchantExecutorMint.verifyPayment(paymentPayload);
@@ -282,6 +278,12 @@ app.post('/mint', async (req, res) => {
     console.error('❌ Error in /mint:', error);
     return res.status(500).json({ error: error?.message || 'Internal server error' });
   }
+});
+
+// Discovery endpoint: return 402 with x402 Accepts on GET for scanners
+app.get('/mint', (req, res) => {
+  const paymentRequired = merchantExecutorMint.createPaymentRequiredResponse();
+  return res.status(402).json(paymentRequired);
 });
 
 /**
