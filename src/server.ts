@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { MerchantExecutor, type MerchantExecutorOptions } from './MerchantExecutor.js';
 import type { Network, PaymentPayload } from 'x402/types';
-import { isWhitelisted } from './whitelist.js';
+import { isWhitelisted, getWhitelist } from './whitelist.js';
 import { mintToAddress } from './MintService.js';
 import { getConfig } from './config.js';
 import {
@@ -191,7 +191,36 @@ app.post('/mint', async (req, res) => {
     const { message } = body as any;
     // Allow empty body; unpaid requests should return 402 with Accepts
 
+    // Log request body structure (sanitized) for debugging
+    console.log('📦 Full request body keys:', Object.keys(body));
+    console.log('📦 Body type:', typeof body);
+    console.log('📦 Body JSON (sanitized):', JSON.stringify(body, (key, value) => {
+      // Hide sensitive data but show structure
+      if (key === 'signature' || (typeof value === 'string' && value.length > 100 && value.startsWith('0x'))) {
+        return value.slice(0, 20) + '...';
+      }
+      return value;
+    }, 2));
+    
+    try {
+      const bodyKeys = Object.keys(body).filter(k => k !== 'x402' && k !== 'paymentPayload' && k !== 'payment');
+      const hasMessage = Boolean(body.message);
+      const hasMetadata = Boolean(body.metadata);
+      const messageKeys = message ? Object.keys(message).filter(k => k !== 'metadata') : [];
+      const messageMetadataKeys = message?.metadata ? Object.keys(message.metadata).filter(k => !k.includes('payment')) : [];
+      console.log(`📦 Request body structure: hasMessage=${hasMessage}, hasMetadata=${hasMetadata}, topLevelKeys=[${bodyKeys.join(',')}]`);
+      if (message) {
+        console.log(`   message keys: [${messageKeys.join(',')}]`);
+        if (message.metadata) {
+          console.log(`   message.metadata keys: [${messageMetadataKeys.join(',')}]`);
+        }
+      }
+    } catch (e) {
+      console.error('Error logging body structure:', e);
+    }
+
     // Accept multiple shapes for x402 fields (message.metadata, metadata, top-level keys)
+    // Also handle Railway API explorer format which might send JSON strings
     let paymentPayload: PaymentPayload | undefined;
     let payloadSource = '';
     const payloadCandidates: Array<[any, string]> = [
@@ -204,8 +233,41 @@ app.post('/mint', async (req, res) => {
       [body?.payment?.payload, 'body.payment.payload'],
       [body?.x402?.payment?.payload, 'body.x402.payment.payload'],
     ];
+    
+    // Try to parse JSON strings if found
     for (const [val, src] of payloadCandidates) {
-      if (val) { paymentPayload = val as PaymentPayload; payloadSource = src; break; }
+      if (val) {
+        try {
+          // If it's a string, try to parse it as JSON
+          if (typeof val === 'string') {
+            const parsed = JSON.parse(val);
+            paymentPayload = parsed as PaymentPayload;
+            payloadSource = `${src} (parsed from JSON string)`;
+            break;
+          } else {
+            paymentPayload = val as PaymentPayload;
+            payloadSource = src;
+            break;
+          }
+        } catch {
+          // If parsing fails, use the value as-is
+          paymentPayload = val as PaymentPayload;
+          payloadSource = src;
+          break;
+        }
+      }
+    }
+    if (!paymentPayload) {
+      console.log('❌ Payment payload not found. Checked locations:');
+      for (const [val, src] of payloadCandidates) {
+        const found = val !== undefined && val !== null;
+        console.log(`   ${src}: ${found ? 'found' : 'not found'}`);
+        if (found) {
+          console.log(`      Value type: ${typeof val}, isObject: ${typeof val === 'object'}`);
+        }
+      }
+    } else {
+      console.log(`✅ Payment payload found at: ${payloadSource}`);
     }
 
     let paymentStatus: string | undefined;
@@ -222,6 +284,15 @@ app.post('/mint', async (req, res) => {
     ];
     for (const [val, src] of statusCandidates) {
       if (typeof val === 'string') { paymentStatus = val; statusSource = src; break; }
+    }
+    if (!paymentStatus) {
+      console.log('❌ Payment status not found. Checked locations:');
+      for (const [val, src] of statusCandidates) {
+        const found = val !== undefined && val !== null;
+        console.log(`   ${src}: ${found ? `found="${val}" (type: ${typeof val})` : 'not found'}`);
+      }
+    } else {
+      console.log(`✅ Payment status found at: ${statusSource} = "${paymentStatus}"`);
     }
 
     // Debug logging for incoming shapes (without leaking signature contents)
@@ -246,7 +317,7 @@ app.post('/mint', async (req, res) => {
 
     if (!paymentPayload || paymentStatus !== 'payment-submitted') {
       const paymentRequired = merchantExecutorMint.createPaymentRequiredResponse();
-      console.log('💰 Payment required for mint');
+      console.log(`💰 Payment required for mint: payload=${paymentPayload ? 'found' : 'missing'}, status="${paymentStatus}" (expected "payment-submitted")`);
       return res.status(402).json(paymentRequired);
     }
 
@@ -262,11 +333,22 @@ app.post('/mint', async (req, res) => {
       return res.status(500).json({ error: 'payer-unavailable' });
     }
 
-    const { whitelistEnabled, perAddressLimit } = getConfig();
+    console.log(`👤 Verified payer: ${payer}`);
 
-    if (whitelistEnabled && !isWhitelisted(payer)) {
-      console.log(`⛔ Payer ${payer} not in whitelist`);
-      return res.status(403).json({ error: 'address-not-whitelisted', payer });
+    const { whitelistEnabled, perAddressLimit } = getConfig();
+    console.log(`📋 Whitelist check: enabled=${whitelistEnabled}, perAddressLimit=${perAddressLimit ?? 'unlimited'}`);
+
+    if (whitelistEnabled) {
+      const isWhitelistedResult = isWhitelisted(payer);
+      const whitelistSize = getWhitelist().size;
+      console.log(`   Checking payer ${payer} against whitelist (${whitelistSize} addresses)...`);
+      if (!isWhitelistedResult) {
+        console.log(`⛔ Payer ${payer} NOT in whitelist`);
+        return res.status(403).json({ error: 'address-not-whitelisted', payer });
+      }
+      console.log(`✅ Payer ${payer} is whitelisted`);
+    } else {
+      console.log(`⚠️ Whitelist is disabled - allowing all addresses`);
     }
 
     // Idempotency: dedupe by payment payload hash
