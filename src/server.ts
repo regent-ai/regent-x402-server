@@ -116,12 +116,12 @@ const merchantOptionsMint: MerchantExecutorOptions = {
       bodyFields: {
         message: {
           type: 'object',
-          required: true,
+          required: false,
           description: 'A2A message with x402 metadata',
           properties: {
             metadata: {
               type: 'object',
-              required: true,
+              required: false,
               properties: {
                 'x402.payment.status': {
                   type: 'string',
@@ -130,7 +130,7 @@ const merchantOptionsMint: MerchantExecutorOptions = {
                 },
                 'x402.payment.payload': {
                   type: 'object',
-                  required: true,
+                  required: false,
                   description: 'x402 exact scheme payload (EIP-3009 authorization + signature)'
                 }
               }
@@ -199,14 +199,12 @@ app.post('/mint', async (req, res) => {
   try {
     console.log('\n📥 Received /mint request');
     const { message } = req.body || {};
-    if (!message) {
-      return res.status(400).json({ error: 'Missing message in request body' });
-    }
+    // Allow empty body; unpaid requests should return 402 with Accepts
 
-    const paymentPayload = message.metadata?.['x402.payment.payload'] as
+    const paymentPayload = message?.metadata?.['x402.payment.payload'] as
       | PaymentPayload
       | undefined;
-    const paymentStatus = message.metadata?.['x402.payment.status'];
+    const paymentStatus = message?.metadata?.['x402.payment.status'];
 
     if (!paymentPayload || paymentStatus !== 'payment-submitted') {
       const paymentRequired = merchantExecutorMint.createPaymentRequiredResponse();
