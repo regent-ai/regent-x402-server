@@ -112,7 +112,15 @@ const merchantOptionsMint: MerchantExecutorOptions = {
     input: {
       type: 'http',
       method: 'POST',
-      bodyType: 'json'
+      bodyType: 'json',
+      bodyFields: {
+        'x402.payment.status': {
+          type: 'string',
+          required: false,
+          enum: ['payment-submitted'],
+          description: 'Client sets this when submitting the signed payment payload'
+        }
+      }
     }
   }
 };
@@ -162,13 +170,22 @@ app.get('/health', (req, res) => {
 app.post('/mint', async (req, res) => {
   try {
     console.log('\n📥 Received /mint request');
-    const { message } = req.body || {};
+    const body = req.body || {};
+    const { message } = body;
     // Allow empty body; unpaid requests should return 402 with Accepts
 
-    const paymentPayload = message?.metadata?.['x402.payment.payload'] as
-      | PaymentPayload
-      | undefined;
-    const paymentStatus = message?.metadata?.['x402.payment.status'];
+    // Accept multiple shapes for x402 fields (message.metadata, metadata, top-level keys)
+    let paymentPayload = (message?.metadata?.['x402.payment.payload'] ??
+      body?.metadata?.['x402.payment.payload'] ??
+      body?.['x402.payment.payload'] ??
+      body?.paymentPayload ??
+      body?.payment?.payload) as PaymentPayload | undefined;
+
+    let paymentStatus = (message?.metadata?.['x402.payment.status'] ??
+      body?.metadata?.['x402.payment.status'] ??
+      body?.['x402.payment.status'] ??
+      body?.paymentStatus ??
+      body?.payment?.status) as string | undefined;
 
     if (!paymentPayload || paymentStatus !== 'payment-submitted') {
       const paymentRequired = merchantExecutorMint.createPaymentRequiredResponse();
