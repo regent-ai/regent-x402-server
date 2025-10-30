@@ -194,14 +194,6 @@ app.post('/mint', async (req, res) => {
     // Log request body structure (sanitized) for debugging
     console.log('📦 Full request body keys:', Object.keys(body));
     console.log('📦 Body type:', typeof body);
-    console.log('📦 Body JSON (sanitized):', JSON.stringify(body, (key, value) => {
-      // Hide sensitive data but show structure
-      if (key === 'signature' || (typeof value === 'string' && value.length > 100 && value.startsWith('0x'))) {
-        return value.slice(0, 20) + '...';
-      }
-      return value;
-    }, 2));
-    
     try {
       const bodyKeys = Object.keys(body).filter(k => k !== 'x402' && k !== 'paymentPayload' && k !== 'payment');
       const hasMessage = Boolean(body.message);
