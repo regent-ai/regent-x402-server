@@ -119,6 +119,11 @@ const merchantOptionsMint: MerchantExecutorOptions = {
           required: false,
           enum: ['payment-submitted'],
           description: 'Client sets this when submitting the signed payment payload'
+        },
+        'x402.payment.payload': {
+          type: 'object',
+          required: false,
+          description: 'Signed x402 exact payload (EIP-3009 authorization + signature)'
         }
       }
     }
@@ -179,10 +184,13 @@ app.post('/mint', async (req, res) => {
     let payloadSource = '';
     const payloadCandidates: Array<[any, string]> = [
       [message?.metadata?.['x402.payment.payload'], 'message.metadata["x402.payment.payload"]'],
+      [message?.metadata?.x402?.payment?.payload, 'message.metadata.x402.payment.payload'],
       [body?.metadata?.['x402.payment.payload'], 'body.metadata["x402.payment.payload"]'],
+      [body?.metadata?.x402?.payment?.payload, 'body.metadata.x402.payment.payload'],
       [body?.['x402.payment.payload'], 'body["x402.payment.payload"]'],
       [body?.paymentPayload, 'body.paymentPayload'],
       [body?.payment?.payload, 'body.payment.payload'],
+      [body?.x402?.payment?.payload, 'body.x402.payment.payload'],
     ];
     for (const [val, src] of payloadCandidates) {
       if (val) { paymentPayload = val as PaymentPayload; payloadSource = src; break; }
@@ -192,10 +200,13 @@ app.post('/mint', async (req, res) => {
     let statusSource = '';
     const statusCandidates: Array<[any, string]> = [
       [message?.metadata?.['x402.payment.status'], 'message.metadata["x402.payment.status"]'],
+      [message?.metadata?.x402?.payment?.status, 'message.metadata.x402.payment.status'],
       [body?.metadata?.['x402.payment.status'], 'body.metadata["x402.payment.status"]'],
+      [body?.metadata?.x402?.payment?.status, 'body.metadata.x402.payment.status'],
       [body?.['x402.payment.status'], 'body["x402.payment.status"]'],
       [body?.paymentStatus, 'body.paymentStatus'],
       [body?.payment?.status, 'body.payment.status'],
+      [body?.x402?.payment?.status, 'body.x402.payment.status'],
     ];
     for (const [val, src] of statusCandidates) {
       if (typeof val === 'string') { paymentStatus = val; statusSource = src; break; }
