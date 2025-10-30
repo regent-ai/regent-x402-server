@@ -1,0 +1,8 @@
+{
+  "name": "Regent Animata #123",
+  "description": "Interactive Comet-style card with seeded shader.",
+  "image": "ipfs://<CID>/previews/0123.webp",
+  "animation_url": "ipfs://<CID>/token.html?id=123"
+}
+
+

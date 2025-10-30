@@ -5,11 +5,9 @@
   "main": "dist/server.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "dev": "tsc && node dist/server.js",
-    "test": "npm run build && node dist/testClient.js",
-    "test:shell": "bash test-request.sh",
+    "build": "bunx tsc",
+    "start": "bun dist/server.js",
+    "dev": "bunx tsc && bun dist/server.js",
     "clean": "rm -rf dist"
   },
   "keywords": [
@@ -22,12 +20,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "x402": "^0.7.0",
     "dotenv": "^16.4.5",
     "ethers": "^6.15.0",
     "express": "^4.21.2",
-    "openai": "^4.78.0",
-    "x402": "^0.7.0"
+    "x402": "^0.7.1"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

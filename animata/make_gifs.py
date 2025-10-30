@@ -59,6 +59,8 @@ def main():
     # Offscreen framebuffer
     fbo = ctx.simple_framebuffer((WIDTH, HEIGHT), components=4)
     fbo.use()
+    # Ensure viewport matches framebuffer size
+    ctx.viewport = (0, 0, WIDTH, HEIGHT)
 
     # Static uniforms
     prog["iResolution"].value = (float(WIDTH), float(HEIGHT), 1.0)
@@ -108,11 +110,14 @@ def main():
 
                 fbo.clear(0.0, 0.0, 0.0, 1.0)
                 vao.render(mode=moderngl.TRIANGLES, vertices=3)
+                ctx.finish()
 
                 # Read RGB, flip vertically (OpenGL origin is bottom-left)
                 data = fbo.read(components=3, dtype="u1", alignment=1)
                 img = np.frombuffer(data, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3))
                 img = np.flipud(img)
+                # Ensure contiguous (avoid negative strides)
+                img = np.ascontiguousarray(img)
 
                 writer.append_data(img)
 

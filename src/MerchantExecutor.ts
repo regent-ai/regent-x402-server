@@ -264,7 +264,7 @@ export class MerchantExecutor {
     return {
       x402Version: 1,
       accepts: [this.requirements],
-      error: 'Payment required for service: /process-request',
+      error: 'Payment required for service',
     };
   }
 

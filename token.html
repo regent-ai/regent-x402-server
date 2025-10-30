@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Regent Animata — Token</title>
+    <style>
+      @font-face {
+        font-family: 'PPMondwest';
+        src: url('public/fonts/PPMondwest-Regular.otf') format('opentype');
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      :root {
+        --bg: #f7f6f3;
+        --card-bg: #1f2121;
+        --text: #ffffff;
+        --muted: #a0a3a7;
+        --radius: 16px;
+      }
+      *,*::before,*::after { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        display: grid;
+        place-items: center;
+        padding: 16px;
+      }
+      .card {
+        appearance: none;
+        border: 0;
+        padding: 8px;
+        width: min(88vw, 360px);
+        aspect-ratio: 3 / 4;
+        border-radius: var(--radius);
+        background: var(--card-bg);
+        cursor: pointer;
+        will-change: transform;
+        transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+        transition: transform 160ms cubic-bezier(0.2, 0.6, 0.2, 1), box-shadow 160ms ease;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+        position: relative;
+        overflow: hidden;
+      }
+      .media { position: absolute; inset: 8px 8px 56px 8px; border-radius: var(--radius); overflow: hidden; background: #000; }
+      .canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: var(--radius); pointer-events: none; }
+      .footer {
+        position: absolute; left: 0; right: 0; bottom: 0; height: 56px;
+        display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
+        font-family: 'PPMondwest', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 20px;
+        color: var(--text); opacity: 0.95; background: linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0));
+      }
+      .muted { color: var(--muted); opacity: 0.6; font-size: 16px; display: inline-flex; align-items: center; }
+      .footer .logo { width: 14px; height: 14px; margin-left: 6px; opacity: 0.9; filter: invert(1) brightness(1.3); }
+    </style>
+  </head>
+  <body>
+    <button id="card" class="card" aria-label="Regent Animata">
+      <div class="media"><canvas id="c" class="canvas"></canvas></div>
+      <div class="footer"><div>Regent Animata <span id="label-id">#001</span></div><div class="muted" id="muted-id">#001 <img class="logo" src="public/regentlogo.svg" alt="Regent" /></div></div>
+    </button>
+    <script>
+      const clamp = (v, a=0, b=1) => Math.min(Math.max(v, a), b);
+      const url = new URL(window.location.href);
+      const search = url.searchParams;
+      const qsId = (() => { const raw = search.get('id'); const id = raw? parseInt(raw,10): NaN; return (Number.isFinite(id) && id>=1 && id<=999) ? id : 1; })();
+      const qsShaderST = ((search.has('st') ? (search.get('st') === '1') : true) || (search.get('shader') === 'st'));
+      const qsVar = (search.has('var') ? (search.get('var') === '1') : true);
+      const onlyStr = (search.get('only') || '').toLowerCase(); // e.g., only=h or only=rot,k,dot
+      const freezeStr = (search.get('freeze') || '').toLowerCase(); // e.g., freeze=h
+      const setStr = (search.get('set') || '').toLowerCase(); // 'min' | 'max'
+      const rotQ = parseFloat(search.get('rot') || '');
+      const kQ = parseFloat(search.get('k') || '');
+      const dotQ = parseFloat(search.get('dot') || '');
+      const hStr = (search.get('h') || '').trim(); // e.g., 3,2,1,1
+      const toneQ = parseFloat(search.get('tone') || '');
+      const onlySet = new Set(onlyStr.split(',').map(s=>s.trim()).filter(Boolean));
+      const freezeSet = new Set(freezeStr.split(',').map(s=>s.trim()).filter(Boolean));
+      function mulberry32(a){return function(){let t=a+=0x6D2B79F5; t=Math.imul(t^t>>>15,1|t); t^=t+Math.imul(t^t>>>7,61|t); return ((t^t>>>14)>>>0)/4294967296;};}
+      document.getElementById('label-id').textContent = '#' + String(qsId).padStart(3,'0');
+      document.getElementById('muted-id').textContent = '#' + String(qsId).padStart(3,'0');
+
+      // Tilt + pointer uniforms
+      const card = document.getElementById('card');
+      let tiltRaf = 0;
+      function setTilt(nx, ny){
+        if (!tiltRaf) {
+          tiltRaf = requestAnimationFrame(()=>{
+            tiltRaf = 0;
+            const x = nx*2 - 1, y = ny*2 - 1;
+            card.style.setProperty('--rx', String(-y*8)+'deg');
+            card.style.setProperty('--ry', String(x*8)+'deg');
+          });
+        }
+      }
+      card.addEventListener('pointermove', (e)=>{
+        const r = card.getBoundingClientRect();
+        const nx = clamp((e.clientX - r.left)/r.width); const ny = clamp((e.clientY - r.top)/r.height);
+        shader && shader.setPointer(nx, ny); setTilt(nx, ny);
+      });
+      card.addEventListener('pointerleave', ()=>{ shader && shader.setPointer(0.5,0.5); card.style.setProperty('--rx','0deg'); card.style.setProperty('--ry','0deg'); });
+
+      // Minimal WebGL2 shader (single-file, no external deps)
+      class SingleShader {
+        constructor(canvas, id){
+          this.canvas = canvas; this.pointer = [0.5,0.5]; this.raf=0; this.id=id;
+          const gl = this.gl = canvas.getContext('webgl2', { antialias:false, alpha:false, depth:false });
+          if(!gl){ this.fallback(); return; }
+          const VS = `#version 300 es\n in vec2 position; in vec2 uv; out vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,0.,1.); }`;
+          const NOISE = `\n vec3 mod289(vec3 x){return x - floor(x*(1.0/289.0))*289.0;}\n vec4 mod289(vec4 x){return x - floor(x*(1.0/289.0))*289.0;}\n vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);} \n vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}\n float snoise(vec3 v){ const vec2 C=vec2(1.0/6.0,1.0/3.0); const vec4 D=vec4(0.0,0.5,1.0,2.0); vec3 i=floor(v+dot(v,C.yyy)); vec3 x0=v-i+dot(i,C.xxx); vec3 g=step(x0.yzx,x0.xyz); vec3 l=1.0-g; vec3 i1=min(g.xyz,l.zxy); vec3 i2=max(g.xyz,l.zxy); vec3 x1=x0-i1+C.xxx; vec3 x2=x0-i2+C.yyy; vec3 x3=x0-D.yyy; i=mod289(i); vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0)); float n_=0.142857142857; vec3 ns=n_*D.wyz-D.xzx; vec4 j=p-49.0*floor(p*ns.z*ns.z); vec4 x_=floor(j*ns.z); vec4 y_=floor(j-7.0*x_); vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy; vec4 h=1.0-abs(x)-abs(y); vec4 b0=vec4(x.xy,y.xy); vec4 b1=vec4(x.zw,y.zw); vec4 s0=floor(b0)*2.0+1.0; vec4 s1=floor(b1)*2.0+1.0; vec4 sh=-step(h,vec4(0.0)); vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy; vec4 a1=b1.xzyw+s1.xzyw*sh.zzww; vec3 g0=vec3(a0.xy,h.x); vec3 g1=vec3(a1.xy,h.y); vec3 g2=vec3(a0.zw,h.z); vec3 g3=vec3(a1.zw,h.w); vec4 norm=taylorInvSqrt(vec4(dot(g0,g0),dot(g1,g1),dot(g2,g2),dot(g3,g3))); g0*=norm.x; g1*=norm.y; g2*=norm.z; g3*=norm.w; vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0); m=m*m; return 42.0*dot(m*m, vec4(dot(g0,x0),dot(g1,x1),dot(g2,x2),dot(g3,x3))); }`;
+
+          // Shadertoy-style function, adapted to use uniforms for the magic numbers
+          const FS_ST = `#version 300 es\n precision mediump float;\n uniform vec2 uRes; uniform float uTime;\n uniform vec4 uH; uniform float uRotSpeed; uniform float uKStep; uniform float uDotDiv;\n uniform float uTone;\n out vec4 fragColor;\n vec3 iResolution; float iTime;\n void mainImage( out vec4 O, vec2 I ) {\n   float i=0.0, d=0.0, s=1.0; vec3 p, r = iResolution;\n   mat2 R = mat2(cos(iTime/uRotSpeed + vec4(0.,33.,11.,0.)));\n   for(i=0.0; i++<1e2; O+=max(1.3*sin(uH + i*.3)/max(s,1e-4), vec4(-length(p*p)))) {\n     p = vec3((I+I - r.xy)/r.y*d*R, d-8.);\n     p.xz *= R;\n     d += s = .012 + clamp(uKStep,0.08,0.18) * abs(max(sin(dot(p.yzx,p)/clamp(uDotDiv,0.5,0.9)), length(p)-4.) - i/1e2);\n   }\n   O = tanh(O*O/uTone);\n }\n void main(){ iResolution = vec3(uRes, 1.0); iTime = uTime; vec4 O = vec4(0.0); mainImage(O, gl_FragCoord.xy); fragColor = O; }`;
+          const FS = `#version 300 es\n precision mediump float; uniform vec2 uRes; uniform float uTime; uniform vec2 uPtr; uniform float uSeed; in vec2 vUv; out vec4 fragColor; ${NOISE}
+float rand(float s){ return fract(sin(s)*43758.5453123); }
+vec3 hsv2rgb(vec3 c){ vec4 K=vec4(1.,2./3.,1./3.,3.); vec3 p=abs(fract(c.xxx+K.xyz)*6.-K.www); return c.z*mix(K.xxx, clamp(p-K.xxx, 0.,1.), c.y);} 
+void main(){
+  // Safe-set randomization
+  float r1 = rand(uSeed*113.); // baseHue
+  float r2 = rand(uSeed*227.); // hueRange
+  float r3 = rand(uSeed*389.); // speed
+  float r4 = rand(uSeed*521.); // frequency
+  float r5 = rand(uSeed*677.); // parallax
+  float r6 = rand(uSeed*811.); // gamma/phase
+
+  float baseHue = r1;
+  float hueRange = mix(0.10, 0.30, r2);
+  float speed = mix(0.18, 0.60, r3);
+  float freq = mix(3.0, 8.0, r4);
+  float parallax = mix(0.03, 0.08, r5);
+  float gamma = mix(0.9, 1.2, r6);
+  float saturation = 1.0; // keep vivid
+  float value = 0.92;     // slightly dimmer
+
+  vec2 uv = vUv + (uPtr-0.5)*parallax; // subtle parallax
+  float t = uTime*speed + r6*10.0;      // phase offset
+  float n = abs(snoise(vec3(uv*freq, t)));
+  n = pow(n, gamma);
+  float hue = fract(baseHue + hueRange*n);
+  vec3 col = hsv2rgb(vec3(hue, saturation, value));
+  fragColor = vec4(col, 1.0);
+}`;
+          // Original Shadertoy body (as-is, no uniforms)
+          const FS_ST_ORIG = `#version 300 es\n precision mediump float; uniform vec2 uRes; uniform float uTime; out vec4 fragColor; vec3 iResolution; float iTime; void mainImage( out vec4 O, vec2 I ) { float i,d,s; vec3 p, r = iResolution; mat2 R = mat2(cos(iTime/2.+vec4(0,33,11,0))); for(O*=i; i++<1e2; O+=max(1.3*sin(vec4(3,2,1,1)+i*.3)/s,-length(p*p))) p = vec3((I+I - r.xy)/r.y*d*R, d-8.), p.xz*=R, d+=s=.012+.08*abs(max(sin(dot(p.yzx,p)/.7),length(p)-4.)-i/1e2); O=tanh(O*O/8e5); } void main(){ iResolution=vec3(uRes,1.0); iTime=uTime; vec4 O=vec4(0.0); mainImage(O, gl_FragCoord.xy); fragColor=O; }`;
+          // Choose shader: Shadertoy (original vs uniformized) or Perlin hue
+          const FS_FINAL = qsShaderST ? (qsVar ? FS_ST : FS_ST_ORIG) : FS;
+          const prog = this.program = (()=>{ const p=gl.createProgram(); const vs=gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs,VS); gl.compileShader(vs); if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(vs)); const fs=gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs,FS_FINAL); gl.compileShader(fs); if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(fs)); gl.attachShader(p,vs); gl.attachShader(p,fs); gl.linkProgram(p); if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); gl.deleteShader(vs); gl.deleteShader(fs); return p; })();
+          gl.useProgram(prog);
+          const positions = new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]);
+          const uvs = new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]);
+          const posLoc = gl.getAttribLocation(prog,'position');
+          const uvLoc = gl.getAttribLocation(prog,'uv');
+          const bufP = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bufP); gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW); gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc,2,gl.FLOAT,false,0,0);
+          const bufU = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bufU); gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.STATIC_DRAW); gl.enableVertexAttribArray(uvLoc); gl.vertexAttribPointer(uvLoc,2,gl.FLOAT,false,0,0);
+          this.uRes = gl.getUniformLocation(prog,'uRes');
+          this.uTime = gl.getUniformLocation(prog,'uTime');
+          this.uPtr = gl.getUniformLocation(prog,'uPtr');
+          this.uSeed = gl.getUniformLocation(prog,'uSeed');
+          if (this.uPtr) gl.uniform2f(this.uPtr, 0.5, 0.5);
+          if (this.uSeed) gl.uniform1f(this.uSeed, ((this.id*9301+49297)%233280)/233280);
+
+          // ST uniforms (only present when qsShaderST)
+          const uH = gl.getUniformLocation(prog,'uH');
+          const uRotSpeed = gl.getUniformLocation(prog,'uRotSpeed');
+          const uKStep = gl.getUniformLocation(prog,'uKStep');
+          const uDotDiv = gl.getUniformLocation(prog,'uDotDiv');
+          const uTone = gl.getUniformLocation(prog,'uTone');
+          if (uH && uRotSpeed && uKStep && uDotDiv) {
+            // Defaults (original constants)
+            let H = [3,2,1,1]; let RS=2.0; let KS=0.08; let DD=0.7;
+            if (setStr === 'min' || setStr === 'max') {
+              // Deterministic sets as requested (hue fixed at 2,2,2,2)
+              H = [2,2,2,2];
+              RS = (setStr === 'min') ? 2.0 : 4.0;
+              KS = (setStr === 'min') ? 0.08 : 0.18;
+              DD = (setStr === 'min') ? 0.5 : 0.9;
+            } else {
+              // Randomized (legacy) – can be narrowed with only/freeze
+              const rng = mulberry32(this.id * 2654435761 >>> 0);
+              let rH = [Math.floor(rng()*7.0), Math.floor(rng()*7.0), Math.floor(rng()*7.0), Math.floor(rng()*7.0)];
+              if (rH[0]===rH[1] && rH[1]===rH[2] && rH[2]===rH[3]) { rH[1] = (rH[1]+1)%7; }
+              const rotChoices = [2,3,4]; const rRS = rotChoices[Math.floor(rng()*rotChoices.length)];
+              const kIdx = Math.floor(rng()*11); const rKS = 0.08 + 0.01 * kIdx;
+              const dotChoices = [0.5,0.6,0.7,0.8,0.9]; const rDD = dotChoices[Math.floor(rng()*dotChoices.length)];
+              function useRandom(key){ return (onlySet.size ? onlySet.has(key) : true) && !freezeSet.has(key); }
+              if (useRandom('h')) H = rH;
+              if (useRandom('rot') || useRandom('rs')) RS = rRS;
+              if (useRandom('k') || useRandom('ks')) KS = rKS;
+              if (useRandom('dot') || useRandom('dd')) DD = rDD;
+            }
+            // Explicit overrides via query (for sweep)
+            if (hStr) {
+              const hv = hStr.split(',').map(s=>Math.max(0,Math.min(6, parseInt(s,10))));
+              if (hv.length === 4 && hv.every(n=>Number.isFinite(n))) H = hv;
+            }
+            if (!Number.isNaN(rotQ)) RS = rotQ;
+            if (!Number.isNaN(kQ)) KS = kQ;
+            if (!Number.isNaN(dotQ)) DD = dotQ;
+            gl.uniform4f(uH, H[0], H[1], H[2], H[3]);
+            gl.uniform1f(uRotSpeed, RS);
+            gl.uniform1f(uKStep, KS);
+            gl.uniform1f(uDotDiv, DD);
+            if (uTone) {
+              const tone = !Number.isNaN(toneQ) ? toneQ : (qsVar ? 2e5 : 8e5);
+              gl.uniform1f(uTone, tone);
+            }
+          }
+          const dpr = Math.min(window.devicePixelRatio||1, 2);
+          const resize = ()=>{ const r=this.canvas.getBoundingClientRect(); const w=Math.max(1, (r.width*dpr)|0); const h=Math.max(1, (r.height*dpr)|0); if(this.canvas.width!==w||this.canvas.height!==h){ this.canvas.width=w; this.canvas.height=h; } gl.viewport(0,0,this.canvas.width,this.canvas.height); gl.uniform2f(this.uRes, this.canvas.width, this.canvas.height); };
+          new ResizeObserver(resize).observe(this.canvas); resize();
+        }
+        fallback(){ const ctx = this.canvas.getContext('2d'); if(!ctx) return; ctx.fillStyle = '#111'; ctx.fillRect(0,0,this.canvas.width,this.canvas.height); ctx.fillStyle='#fff'; ctx.font='14px monospace'; ctx.fillText('WebGL2 not available', 8, 20); }
+        setPointer(nx, ny){ if(this.gl && this.uPtr){ this.gl.uniform2f(this.uPtr, nx, 1.0-ny); } }
+        start(){ if(this.raf || !this.gl) return; const gl=this.gl; const draw=(t)=>{ gl.uniform1f(this.uTime, t*0.001); gl.drawArrays(gl.TRIANGLES,0,6); this.raf=requestAnimationFrame(draw); }; this.raf=requestAnimationFrame(draw); }
+        stop(){ if(!this.raf) return; cancelAnimationFrame(this.raf); this.raf=0; }
+      }
+
+      const shader = new SingleShader(document.getElementById('c'), qsId);
+      shader.start();
+    </script>
+  </body>
+  </html>
+
+

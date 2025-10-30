@@ -1,8 +1,17 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { ExampleService } from './ExampleService.js';
 import { MerchantExecutor, type MerchantExecutorOptions } from './MerchantExecutor.js';
 import type { Network, PaymentPayload } from 'x402/types';
+import { isWhitelisted } from './whitelist.js';
+import { mintToAddress } from './MintService.js';
+import { getConfig } from './config.js';
+import {
+  getMintCount,
+  incMintCount,
+  paymentIdFromPayload,
+  isPaymentProcessed,
+  markPaymentProcessed,
+} from './store.js';
 import {
   EventQueue,
   Message,
@@ -21,11 +30,10 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const PAY_TO_ADDRESS = process.env.PAY_TO_ADDRESS;
 const NETWORK = process.env.NETWORK || 'base-sepolia';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const FACILITATOR_API_KEY = process.env.FACILITATOR_API_KEY;
-const SERVICE_URL =
-  process.env.SERVICE_URL || `http://localhost:${PORT}/process`;
+const SERVICE_URL_MINT =
+  process.env.SERVICE_URL_MINT || `http://localhost:${PORT}/mint`;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const RPC_URL = process.env.RPC_URL;
 const SETTLEMENT_MODE_ENV = process.env.SETTLEMENT_MODE?.toLowerCase();
@@ -34,21 +42,6 @@ const ASSET_NAME = process.env.ASSET_NAME;
 const EXPLORER_URL = process.env.EXPLORER_URL;
 const CHAIN_ID = process.env.CHAIN_ID
   ? Number.parseInt(process.env.CHAIN_ID, 10)
-  : undefined;
-const AI_PROVIDER = (process.env.AI_PROVIDER || 'openai').toLowerCase();
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
-const EIGENAI_BASE_URL =
-  process.env.EIGENAI_BASE_URL || 'https://eigenai.eigencloud.xyz/v1';
-const EIGENAI_API_KEY = process.env.EIGENAI_API_KEY;
-const AI_MODEL = process.env.AI_MODEL;
-const AI_TEMPERATURE = process.env.AI_TEMPERATURE
-  ? Number.parseFloat(process.env.AI_TEMPERATURE)
-  : undefined;
-const AI_MAX_TOKENS = process.env.AI_MAX_TOKENS
-  ? Number.parseInt(process.env.AI_MAX_TOKENS, 10)
-  : undefined;
-const AI_SEED = process.env.AI_SEED
-  ? Number.parseInt(process.env.AI_SEED, 10)
   : undefined;
 const SUPPORTED_NETWORKS: Network[] = [
   'base',
@@ -64,24 +57,6 @@ const SUPPORTED_NETWORKS: Network[] = [
   'solana',
   'solana-devnet',
 ];
-
-// Validate environment variables
-if (AI_PROVIDER === 'openai') {
-  if (!OPENAI_API_KEY) {
-    console.error('❌ OPENAI_API_KEY is required when AI_PROVIDER=openai');
-    process.exit(1);
-  }
-} else if (AI_PROVIDER === 'eigenai') {
-  if (!EIGENAI_API_KEY && !OPENAI_API_KEY) {
-    console.error('❌ EIGENAI_API_KEY (or OPENAI_API_KEY fallback) is required when AI_PROVIDER=eigenai');
-    process.exit(1);
-  }
-} else {
-  console.error(
-    `❌ AI_PROVIDER "${AI_PROVIDER}" is not supported. Supported providers: openai, eigenai`
-  );
-  process.exit(1);
-}
 
 if (!PAY_TO_ADDRESS) {
   console.error('❌ PAY_TO_ADDRESS is required');
@@ -117,35 +92,14 @@ if (settlementMode === 'direct' && !PRIVATE_KEY) {
   process.exit(1);
 }
 
-const exampleService = new ExampleService({
-  provider: AI_PROVIDER === 'eigenai' ? 'eigenai' : 'openai',
-  apiKey: AI_PROVIDER === 'openai' ? OPENAI_API_KEY : undefined,
-  baseUrl:
-    AI_PROVIDER === 'eigenai'
-      ? EIGENAI_BASE_URL
-      : OPENAI_BASE_URL || undefined,
-  defaultHeaders:
-    AI_PROVIDER === 'eigenai'
-      ? { 'x-api-key': (EIGENAI_API_KEY || OPENAI_API_KEY)! }
-      : undefined,
+// Initialize x402 executor for /mint
+const merchantOptionsMint: MerchantExecutorOptions = {
   payToAddress: PAY_TO_ADDRESS,
   network: resolvedNetwork,
-  model:
-    AI_MODEL ??
-    (AI_PROVIDER === 'eigenai' ? 'gpt-oss-120b-f16' : 'gpt-4o-mini'),
-  temperature: AI_TEMPERATURE ?? 0.7,
-  maxTokens: AI_MAX_TOKENS ?? 500,
-  seed: AI_PROVIDER === 'eigenai' ? AI_SEED : undefined,
-});
-
-// Initialize the example service (replace with your own service)
-const merchantOptions: MerchantExecutorOptions = {
-  payToAddress: PAY_TO_ADDRESS,
-  network: resolvedNetwork,
-  price: 0.1,
+  price: 80,
   facilitatorUrl: FACILITATOR_URL,
   facilitatorApiKey: FACILITATOR_API_KEY,
-  resourceUrl: SERVICE_URL,
+  resourceUrl: SERVICE_URL_MINT,
   settlementMode,
   rpcUrl: RPC_URL,
   privateKey: PRIVATE_KEY,
@@ -155,7 +109,7 @@ const merchantOptions: MerchantExecutorOptions = {
   chainId: CHAIN_ID,
 };
 
-const merchantExecutor = new MerchantExecutor(merchantOptions);
+const merchantExecutorMint = new MerchantExecutor(merchantOptionsMint);
 
 if (settlementMode === 'direct') {
   console.log('🧩 Using local settlement (direct EIP-3009 via RPC)');
@@ -173,7 +127,7 @@ if (settlementMode === 'direct') {
 console.log('🚀 x402 Payment API initialized');
 console.log(`💰 Payment address: ${PAY_TO_ADDRESS}`);
 console.log(`🌐 Network: ${resolvedNetwork}`);
-console.log(`💵 Price per request: $0.10 USDC`);
+console.log(`💵 Mint price: $80.00 USDC`);
 
 /**
  * Health check endpoint
@@ -186,55 +140,24 @@ app.get('/health', (req, res) => {
     payment: {
       address: PAY_TO_ADDRESS,
       network: NETWORK,
-      price: '$0.10',
+      mint: {
+        resource: '/mint',
+        price: '$80.00',
+      },
     },
   });
 });
 
 /**
- * Main endpoint to process paid requests
- * This endpoint accepts A2A-compatible task submissions with x402 payments
+ * Paid mint endpoint: verifies x402 payment, checks whitelist, mints NFT, then settles
  */
-app.post('/process', async (req, res) => {
+app.post('/mint', async (req, res) => {
   try {
-    console.log('\n📥 Received request');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-
-    // Parse the incoming request
-    const { message, taskId, contextId, metadata } = req.body;
-
+    console.log('\n📥 Received /mint request');
+    const { message } = req.body || {};
     if (!message) {
-      return res.status(400).json({
-        error: 'Missing message in request body',
-      });
+      return res.status(400).json({ error: 'Missing message in request body' });
     }
-
-    // Create a task from the request
-    const task: Task = {
-      id: taskId || `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      contextId: contextId || `context-${Date.now()}`,
-      status: {
-        state: TaskState.INPUT_REQUIRED,
-        message: message,
-      },
-      metadata: metadata || {},
-    };
-
-    // Create request context
-    const context: RequestContext = {
-      taskId: task.id,
-      contextId: task.contextId,
-      currentTask: task,
-      message: message,
-    };
-
-    // Create event queue to collect responses
-    const events: Task[] = [];
-    const eventQueue: EventQueue = {
-      enqueueEvent: async (event: Task) => {
-        events.push(event);
-      },
-    };
 
     const paymentPayload = message.metadata?.['x402.payment.payload'] as
       | PaymentPayload
@@ -242,157 +165,89 @@ app.post('/process', async (req, res) => {
     const paymentStatus = message.metadata?.['x402.payment.status'];
 
     if (!paymentPayload || paymentStatus !== 'payment-submitted') {
-      const paymentRequired = merchantExecutor.createPaymentRequiredResponse();
-
-      const responseMessage: Message = {
-        messageId: `msg-${Date.now()}`,
-        role: 'agent',
-        parts: [
-          {
-            kind: 'text',
-            text: 'Payment required. Please submit payment to continue.',
-          },
-        ],
-        metadata: {
-          'x402.payment.required': paymentRequired,
-          'x402.payment.status': 'payment-required',
-        },
-      };
-
-      task.status.state = TaskState.INPUT_REQUIRED;
-      task.status.message = responseMessage;
-      task.metadata = {
-        ...(task.metadata || {}),
-        'x402.payment.required': paymentRequired,
-        'x402.payment.status': 'payment-required',
-      };
-
-      events.push(task);
-      console.log('💰 Payment required for request processing');
-
-      return res.json({
+      const paymentRequired = merchantExecutorMint.createPaymentRequiredResponse();
+      console.log('💰 Payment required for mint');
+      return res.status(402).json({
         success: false,
         error: 'Payment Required',
-        task,
-        events,
+        required: paymentRequired,
       });
     }
 
-    const verifyResult = await merchantExecutor.verifyPayment(paymentPayload);
-
+    const verifyResult = await merchantExecutorMint.verifyPayment(paymentPayload);
     if (!verifyResult.isValid) {
-      const errorReason = verifyResult.invalidReason || 'Invalid payment';
-      task.status.state = TaskState.FAILED;
-      task.status.message = {
-        messageId: `msg-${Date.now()}`,
-        role: 'agent',
-        parts: [
-          {
-            kind: 'text',
-            text: `Payment verification failed: ${errorReason}`,
-          },
-        ],
-        metadata: {
-          'x402.payment.status': 'payment-rejected',
-          'x402.payment.error': errorReason,
-        },
-      };
-      task.metadata = {
-        ...(task.metadata || {}),
-        'x402.payment.status': 'payment-rejected',
-        'x402.payment.error': errorReason,
-      };
+      const reason = verifyResult.invalidReason || 'Invalid payment';
+      console.log(`❌ Payment verification failed: ${reason}`);
+      return res.status(402).json({ error: 'payment-rejected', reason });
+    }
 
-      events.push(task);
+    const payer = (verifyResult.payer || '').toLowerCase();
+    if (!payer) {
+      return res.status(500).json({ error: 'payer-unavailable' });
+    }
 
-      return res.status(402).json({
-        error: 'Payment verification failed',
-        reason: errorReason,
-        task,
-        events,
+    const { whitelistEnabled, perAddressLimit } = getConfig();
+
+    if (whitelistEnabled && !isWhitelisted(payer)) {
+      console.log(`⛔ Payer ${payer} not in whitelist`);
+      return res.status(403).json({ error: 'address-not-whitelisted', payer });
+    }
+
+    // Idempotency: dedupe by payment payload hash
+    const paymentId = paymentIdFromPayload(paymentPayload);
+    if (isPaymentProcessed(paymentId)) {
+      const used = getMintCount(payer);
+      const remaining = perAddressLimit == null ? null : Math.max(0, perAddressLimit - used);
+      return res.json({ success: true, alreadyProcessed: true, payer, remainingMints: remaining });
+    }
+
+    // Quota: max 3 mints per address
+    const used = getMintCount(payer);
+    if (perAddressLimit != null && used >= perAddressLimit) {
+      console.log(`⛔ Payer ${payer} exceeded mint limit (used=${used}, limit=${perAddressLimit})`);
+      return res.status(403).json({ error: 'mint-limit-reached', limit: perAddressLimit, payer });
+    }
+
+    console.log(`✅ Payer ${payer} verified and whitelisted. Minting...`);
+    const mint = await mintToAddress(payer);
+    if (!mint.success || !mint.transactionHash) {
+      console.error(`❌ Mint failed: ${mint.errorReason || 'unknown'}`);
+      return res.status(500).json({
+        error: 'mint-failed',
+        reason: mint.errorReason,
+        payer,
       });
     }
 
-    task.metadata = {
-      ...(task.metadata || {}),
-      'x402_payment_verified': true,
-      'x402.payment.status': 'payment-verified',
-      ...(verifyResult.payer ? { 'x402.payment.payer': verifyResult.payer } : {}),
-    };
+    // Record mint usage and idempotency as soon as mint succeeds
+    const newCount = incMintCount(payer, 1);
+    markPaymentProcessed(paymentId);
 
-    await exampleService.execute(context, eventQueue);
-
-    const settlement = await merchantExecutor.settlePayment(paymentPayload);
-
-    task.metadata = {
-      ...(task.metadata || {}),
-      'x402.payment.status': settlement.success ? 'payment-completed' : 'payment-failed',
-      ...(settlement.transaction
-        ? { 'x402.payment.receipts': [settlement] }
-        : {}),
-      ...(settlement.errorReason
-        ? { 'x402.payment.error': settlement.errorReason }
-        : {}),
-    };
-
-    if (events.length === 0) {
-      events.push(task);
-    }
-
-    console.log('📤 Sending response\n');
+    const settlement = await merchantExecutorMint.settlePayment(paymentPayload);
+    console.log('📤 Mint + settlement completed');
 
     return res.json({
-      success: settlement.success,
-      task: events[events.length - 1],
-      events,
+      success: true,
+      payer,
+      mintTxHash: mint.transactionHash,
+      tokenUri: mint.tokenUri,
       settlement,
+      remainingMints: perAddressLimit == null ? null : Math.max(0, perAddressLimit - newCount),
     });
   } catch (error: any) {
-    console.error('❌ Error processing request:', error);
-
-    return res.status(500).json({
-      error: error.message || 'Internal server error',
-    });
+    console.error('❌ Error in /mint:', error);
+    return res.status(500).json({ error: error?.message || 'Internal server error' });
   }
 });
 
 /**
  * Simple test endpoint to try the agent
  */
-app.post('/test', async (req, res) => {
-  const message: Message = {
-    messageId: `msg-${Date.now()}`,
-    role: 'user',
-    parts: [
-      {
-        kind: 'text',
-        text: req.body.text || 'Hello, tell me a joke!',
-      },
-    ],
-  };
-
-  try {
-    const response = await fetch(`http://localhost:${PORT}/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ message }),
-    });
-
-    const data = await response.json();
-    res.json(data);
-  } catch (error: any) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
-});
+// (test endpoint removed)
 
 // Start the server
 app.listen(PORT, () => {
   console.log(`\n✅ Server running on http://localhost:${PORT}`);
   console.log(`📖 Health check: http://localhost:${PORT}/health`);
-  console.log(`🧪 Test endpoint: POST http://localhost:${PORT}/test`);
-  console.log(`🚀 Main endpoint: POST http://localhost:${PORT}/process\n`);
+  console.log(`🧬 Mint endpoint: POST http://localhost:${PORT}/mint\n`);
 });

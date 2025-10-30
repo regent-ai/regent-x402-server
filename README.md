@@ -8,27 +8,27 @@ A starter kit for building paid APIs using the x402 payment protocol.
 
 ## Overview
 
-This starter kit demonstrates how to build paid APIs using x402. It:
+This starter kit demonstrates how to build paid APIs using x402. This fork focuses on a paid NFT mint flow:
 
 1. Receives API requests
-2. Requires payment (in this example of $0.10 USDC) before processing
-3. Verifies and settles payments through the x402 facilitator (defaulting to https://x402.org/facilitator)
-4. Processes requests (using OpenAI/EigenAI as configurable examples)
-5. Returns responses after payment is confirmed
+2. Requires payment ($80 USDC) for `POST /mint`
+3. Verifies payment via x402 (facilitator or local)
+4. Checks whitelist and mints an NFT to the payer address
+5. Settles payment and returns the mint transaction details
 
 ## Architecture
 
-The API consists of three main components:
+The API consists of these components:
 
-- **ExampleService**: Example service logic that processes requests using OpenAI or EigenAI (replace with your own service implementation)
-- **MerchantExecutor**: Calls the x402 facilitator service for verification/settlement (defaults to `https://x402.org/facilitator`, configurable via `FACILITATOR_URL`)
-- **Server**: Express HTTP server that orchestrates payment validation and request processing
+- **MerchantExecutor**: x402 verification/settlement helper (hosted facilitator or local EIP‑3009)
+- **MintService**: Ethers-based minter that calls your NFT contract
+- **Whitelist loader**: Parses `WLaddress.txt` for allowlist gating
+- **Server**: Express HTTP server with `/health` and `/mint`
 
 ## Prerequisites
 
-- Node.js 18 or higher
+- Node.js 18 or higher (Bun 1.1+ recommended)
 - A wallet with some ETH for gas fees (on your chosen network)
-- An OpenAI API key (for the example implementation - replace with your own API)
 - A wallet address to receive USDC payments
 
 ## Setup
@@ -36,7 +36,7 @@ The API consists of three main components:
 ### 1. Install Dependencies
 
 ```bash
-npm install
+bun install
 ```
 
 ### 2. Configure Environment Variables
@@ -61,23 +61,25 @@ PAY_TO_ADDRESS=0xYourWalletAddress
 # Options: "base", "base-sepolia", "ethereum", "polygon", "polygon-amoy"
 NETWORK=base-sepolia
 
-# AI Provider Configuration
-# Options: "openai" (default) or "eigenai"
-# AI_PROVIDER=openai
-# AI_MODEL=gpt-4o-mini
-# AI_TEMPERATURE=0.7
-# AI_MAX_TOKENS=500
-# AI_SEED=42
-
-# OpenAI Configuration
-# Your OpenAI API key for the example service (replace with your own API configuration)
-OPENAI_API_KEY=your_openai_api_key_here
-# Optional: override the OpenAI base URL
-# OPENAI_BASE_URL=https://api.openai.com/v1
-
-# EigenAI Configuration (required if AI_PROVIDER=eigenai)
-# EIGENAI_API_KEY=your_eigenai_api_key_here
-# EIGENAI_BASE_URL=https://eigenai.eigencloud.xyz/v1
+# Mint Configuration
+# Base RPC endpoint (e.g., https://sepolia.base.org)
+MINT_RPC_URL=
+# Chain ID: 84532 (Base Sepolia) or 8453 (Base)
+MINT_CHAIN_ID=84532
+# Private key for the mint signer (DO NOT COMMIT)
+MINT_SIGNER_PRIVATE_KEY=
+# NFT contract to call
+NFT_CONTRACT_ADDRESS=
+# Optional path to ABI JSON (array or { abi: [...] })
+# NFT_ABI_PATH=./abi/MyNft.json
+# Method to call: mint or safeMint (default: mint)
+MINT_METHOD=mint
+# Optional: pass token URI (otherwise calls single-arg mint)
+# MINT_TOKEN_URI=ipfs://CID/1.json
+# Or a template to pick random id in range
+# MINT_TOKEN_URI_TEMPLATE=ipfs://CID/{id}.json
+# MINT_TOKEN_ID_MIN=1
+# MINT_TOKEN_ID_MAX=999
 
 # Facilitator Configuration (optional)
 # FACILITATOR_URL=https://your-custom-facilitator.com
@@ -94,9 +96,9 @@ OPENAI_API_KEY=your_openai_api_key_here
 # EXPLORER_URL=https://explorer.your-network.org
 # CHAIN_ID=84532
 
-# Public Service URL (optional)
+# Public Service URL for mint (optional)
 # Used in payment requirements so the facilitator sees a fully-qualified resource URL
-# SERVICE_URL=http://localhost:3000/process
+# SERVICE_URL_MINT=http://localhost:3000/mint
 
 # Test Client Configuration (optional - only needed for end-to-end payment testing)
 # CLIENT_PRIVATE_KEY=your_test_wallet_private_key_here
@@ -110,11 +112,7 @@ X402_DEBUG=true
 
 1. **Run the API**
    ```bash
-   npm run dev
-   ```
-2. **Run the test suite (in another terminal)**
-   ```bash
-   npm test
+   bun run dev
    ```
 
 **Settlement Modes:**
@@ -140,14 +138,14 @@ X402_DEBUG=true
 ### Development Mode
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 ### Production Mode
 
 ```bash
-npm run build
-npm start
+bun run build
+bun run start
 ```
 
 The server will start on `http://localhost:3000` (or your configured PORT).
@@ -181,108 +179,39 @@ Response:
   "payment": {
     "address": "0xYourAddress...",
     "network": "base-sepolia",
-    "price": "$0.10"
+    "mint": { "resource": "/mint", "price": "$80.00" }
   }
 }
 ```
 
-### Testing the API
+### Mint Endpoint (`POST /mint`)
 
-We provide multiple ways to test the API:
-
-#### 1. Quick Test Script
-
-Run the simple shell test:
+Unpaid request (expect 402):
 
 ```bash
-./test-request.sh
-```
-
-This tests the health endpoint and payment requirement flow.
-
-#### 2. Full Test Suite
-
-Run the comprehensive test client:
-
-```bash
-npm test
-```
-
-This will:
-- Check API health
-- Test unpaid requests (returns 402)
-- Test paid requests (if CLIENT_PRIVATE_KEY is configured)
-- Show the complete payment flow
-
-See [TESTING.md](./TESTING.md) for detailed testing documentation.
-
-#### 3. Manual Testing (Simple)
-
-For quick testing without the full A2A protocol:
-
-```bash
-curl -X POST http://localhost:3000/test \
+curl -X POST http://localhost:3000/mint \
   -H "Content-Type: application/json" \
-  -d '{"text": "Tell me a joke about programming"}'
+  -d '{"message": {"parts": [{"kind":"text","text":"mint"}]}}'
 ```
 
-This will return a payment required error since no payment was made.
+Paid flow:
 
-#### Main Endpoint (A2A Compatible)
+1. Read the 402 response to get payment requirements for the `/mint` resource.
+2. Use an x402-compatible client to sign an EIP-3009 payload for the shown requirements.
+3. Submit the signed payload in `message.metadata["x402.payment.payload"]` and set `message.metadata["x402.payment.status"] = "payment-submitted"`.
+4. If the payer address (from verification) is in `WLaddress.txt`, the server mints to that payer and then settles payment.
 
-Send a request using the A2A message format:
-
-```bash
-curl -X POST http://localhost:3000/process \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": {
-      "parts": [
-        {
-          "kind": "text",
-          "text": "What is the meaning of life?"
-        }
-      ]
-    }
-  }'
-```
-
-**Expected Response (402 Payment Required):**
+Response (success):
 
 ```json
 {
-  "error": "Payment Required",
-  "x402": {
-    "x402Version": 1,
-    "accepts": [
-      {
-        "scheme": "exact",
-        "network": "base-sepolia",
-        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-        "payTo": "0xYourAddress...",
-        "maxAmountRequired": "100000",
-        "resource": "/process-request",
-        "description": "AI request processing service",
-        "mimeType": "application/json",
-        "maxTimeoutSeconds": 3600,
-        "extra": {
-          "name": "USDC",
-          "version": "2"
-        }
-      }
-    ],
-    "error": "Payment required for service: /process-request"
-  }
+  "success": true,
+  "payer": "0x...",
+  "mintTxHash": "0x...",
+  "tokenUri": "ipfs://.../123.json",
+  "settlement": { "success": true, "network": "base-sepolia", "transaction": "0x..." }
 }
 ```
-
-To complete the payment and process the request, you'll need to:
-
-1. Create a payment payload using the x402 client library
-2. Sign the payment with your wallet
-3. Submit the payment back to the `/process` endpoint
-
-For a complete client example, see the [`x402` library documentation](https://www.npmjs.com/package/x402).
 
 ## How It Works
 
@@ -293,9 +222,9 @@ For a complete client example, see the [`x402` library documentation](https://ww
 3. **Client signs payment** → Creates EIP-3009 authorization
 4. **Client submits payment** → Sends signed payment back to API
 5. **API verifies payment** → Checks signature and authorization
-6. **API processes request** → Calls your service (OpenAI in this example)
+6. **API processes request** → Mints an NFT to the payer (if whitelisted)
 7. **API settles payment** → Completes blockchain transaction
-8. **API returns response** → Sends the service response
+8. **API returns response** → Sends mint and settlement details
 
 ### Payment Verification
 
@@ -304,14 +233,14 @@ For a complete client example, see the [`x402` library documentation](https://ww
 - **Facilitator mode** (default): forwards payloads to `https://x402.org/facilitator` or the URL set in `FACILITATOR_URL`
 - **Local mode**: verifies signatures with `ethers.verifyTypedData` and submits `transferWithAuthorization` via your configured RPC/PRIVATE_KEY
 
-Make sure `SERVICE_URL` reflects the public URL of your paid endpoint so the facilitator can validate the `resource` field when using facilitator mode.
+Make sure `SERVICE_URL_MINT` reflects the public URL of your paid `/mint` endpoint so the facilitator can validate the `resource` field when using facilitator mode.
 
 ### Error Handling
 
 - **Missing payment**: Returns 402 Payment Required
 - **Invalid payment**: Returns payment verification failure
-- **OpenAI error**: Returns error message in task status
 - **Settlement failure**: Returns settlement error details
+ - **Mint failure**: Returns `mint-failed` with reason; payment is not settled
 
 ## Development
 
@@ -321,10 +250,10 @@ Make sure `SERVICE_URL` reflects the public URL of your paid endpoint so the fac
 x402-developer-starter-kit/
 ├── src/
 │   ├── server.ts                     # Express server and endpoints
-│   ├── ExampleService.ts             # Example service logic (replace with your own)
 │   ├── MerchantExecutor.ts           # Payment verification & settlement helpers
 │   ├── x402Types.ts                  # Shared task/message types
-│   └── testClient.ts                 # Test client for development
+│   ├── MintService.ts                # Ethers contract minter
+│   └── whitelist.ts                  # WLaddress.txt loader
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
@@ -336,7 +265,7 @@ x402-developer-starter-kit/
 ### Building
 
 ```bash
-npm run build
+bun run build
 ```
 
 Compiled files will be in the `dist/` directory.
@@ -358,9 +287,14 @@ To test with real USDC payments:
 
 ## Troubleshooting
 
-### "OPENAI_API_KEY is required"
+### "Mint failed"
 
-Make sure you've set `OPENAI_API_KEY` in your `.env` file.
+Check that:
+- `MINT_RPC_URL` is correct and reachable
+- `MINT_SIGNER_PRIVATE_KEY` has gas on the target chain
+- `NFT_CONTRACT_ADDRESS` is correct and the signer has permission to mint
+- `MINT_METHOD` matches a function on the contract (e.g., `mint(address)` or `safeMint(address)`)
+- If passing a token URI, contract supports `(address,string)` signature
 
 ### "PAY_TO_ADDRESS is required"
 
@@ -375,13 +309,9 @@ Make sure you've set `PAY_TO_ADDRESS` in your `.env` file to your wallet address
 - For facilitator settlement errors, confirm the facilitator is reachable and that any `FACILITATOR_URL` / `FACILITATOR_API_KEY` settings are correct
 - For local settlement errors, ensure your `PRIVATE_KEY` has gas and that the configured `RPC_URL` (or the network default) is responsive
 
-### OpenAI rate limits
+### Address not whitelisted
 
-If you hit OpenAI rate limits, consider:
-- Using `gpt-3.5-turbo` instead of `gpt-4o-mini`
-- Implementing request queuing
-- Adding rate limiting to your API
-- Replacing OpenAI with your own service
+Add the payer address (the `from` recovered from the EIP‑3009 signature) to `WLaddress.txt` (one per line, case-insensitive). Comments with `#` and blank lines are ignored.
 
 ## Security Considerations
 
@@ -411,3 +341,7 @@ ISC
 - [x402 Package on npm](https://www.npmjs.com/package/x402)
 - [A2A Specification](https://github.com/google/a2a)
 - [OpenAI API Documentation](https://platform.openai.com/docs)
+
+## NFT Mint Workflow (Whitelist)
+
+This server includes a planned paid endpoint `POST /mint` that mints an NFT to the payer address only if that address is present in `WLaddress.txt` (one address per line). See `AGENTS.md` for implementation notes and operational guidance.

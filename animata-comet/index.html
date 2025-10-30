@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Regent Animata – Interactive Card</title>
+    <meta
+      name="description"
+      content="Interactive Perlin shader inside a Comet-style card. Use ?id=### to seed variations."
+    />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <div class="hc-wrapper" id="hc-wrapper">
+        <div class="hc-card" id="hc-card">
+          <div class="hc-inside">
+            <canvas id="perlin-canvas" class="hc-canvas" aria-hidden="true"></canvas>
+            <div class="hc-shine"></div>
+            <div class="hc-glare"></div>
+            <div class="hc-content-wrapper">
+              <div class="hc-content"></div>
+            </div>
+          </div>
+          <div class="hc-footer">
+            <div class="hc-footer-left">Regent Animata</div>
+            <div class="hc-footer-right" id="token-id">#0001</div>
+          </div>
+        </div>
+      </div>
+    </main>
+    <script src="./script.js" defer></script>
+  </body>
+  </html>
+
+

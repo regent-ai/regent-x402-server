@@ -10,6 +10,7 @@ uniform ivec4 uHueI;         // four ints in [0..6]
 uniform float uRotSpeed;     // 2.0, 3.0, or 4.0  (used as divisor in iTime/uRotSpeed)
 uniform float uScale;        // replaces ".08"  (0.08 .. 0.18 step 0.01)
 uniform float uDotDiv;       // replaces ".7"   (0.5 .. 0.9 step 0.1)
+uniform float uGain;         // overall exposure/brightness (e.g., 0.25..0.6)
 
 #define PI 3.14159265358979323846
 
@@ -20,15 +21,14 @@ void mainImage(out vec4 O, vec2 I)
     vec3  p;
     vec3  r = iResolution;
 
-    // rotation matrix from your original:
-    // mat2 R = mat2(cos(iTime/2. + vec4(0,33,11,0)));
-    // generalized to use uRotSpeed instead of literal "2"
-    vec4  ph = vec4(0.0, 33.0, 11.0, 0.0);
-    vec4  c  = cos(iTime / uRotSpeed + ph);
-    mat2  R  = mat2(c.x, c.y, c.z, c.w);
+    // Robust rotation matrix (replace golfing trick with explicit cos/sin)
+    float a = iTime / uRotSpeed;
+    mat2  R = mat2(cos(a), -sin(a),
+                   sin(a),  cos(a));
 
-    // map 0..6 to 7 evenly spaced hue phase steps around [0..2π)
-    vec4 hue = (2.0*PI/7.0) * vec4(uHueI);
+    // map 0..6 to 7 evenly spaced hue phase steps around [0..2π),
+    // applied as an offset to the original (3,2,1,1) palette vector
+    vec4 baseHue = vec4(3.0, 2.0, 1.0, 1.0) + (2.0*PI/7.0) * vec4(uHueI);
 
     O = vec4(0.0);
     for (int k = 0; k < 100; ++k) {
@@ -42,15 +42,21 @@ void mainImage(out vec4 O, vec2 I)
 
         d += s;
 
-        O += max( 1.3 * sin(hue + i * 0.3) / s,
+        O += max( 1.3 * sin(baseHue + i * 0.3) / s,
                   -length(p * p) );
     }
 
-    O = tanh(O * O / 800000.0);
+    // Tonemap to avoid harsh whites
+    vec3 rgb = max(O.rgb, 0.0) * uGain;
+    // Simple Reinhard tonemap
+    rgb = rgb / (1.0 + rgb);
+    // Gamma to display space
+    rgb = pow(rgb, vec3(1.0/2.2));
+    O = vec4(rgb, 1.0);
 }
 
 void main() {
     vec4 col;
     mainImage(col, gl_FragCoord.xy);
-    FragColor = vec4(clamp(col.rgb, 0.0, 1.0), 1.0);
+    FragColor = col;
 }

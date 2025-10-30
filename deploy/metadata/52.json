@@ -1,0 +1,46 @@
+{
+  "name": "Regent Animata #52",
+  "description": "Animata is endowed with spirit and biologic life, fighting with tooth and claw. The marvels they make, and make of us.",
+  "animation_url": "ipfs://bafybeialcptifykq7t3pmctbtvj4kktzhmdovk4cqe3rzquwaid3hyjvgm/token.html?id=52",
+  "attributes": [
+    {
+      "trait_type": "Hue 1",
+      "value": 1,
+      "display_type": "number"
+    },
+    {
+      "trait_type": "Hue 2",
+      "value": 0,
+      "display_type": "number"
+    },
+    {
+      "trait_type": "Hue 3",
+      "value": 4,
+      "display_type": "number"
+    },
+    {
+      "trait_type": "Hue 4",
+      "value": 5,
+      "display_type": "number"
+    },
+    {
+      "trait_type": "Rotation Speed",
+      "value": 3,
+      "display_type": "number"
+    },
+    {
+      "trait_type": "K Step",
+      "value": 0.12,
+      "display_type": "number"
+    },
+    {
+      "trait_type": "Dot Div",
+      "value": 0.6,
+      "display_type": "number"
+    },
+    {
+      "trait_type": "Human Supporter",
+      "value": "True"
+    }
+  ]
+}
