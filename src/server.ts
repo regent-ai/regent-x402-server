@@ -194,6 +194,12 @@ app.post('/mint', async (req, res) => {
     // Log request body structure (sanitized) for debugging
     console.log('📦 Full request body keys:', Object.keys(body));
     console.log('📦 Body type:', typeof body);
+    if (body.x402) {
+      console.log('📦 body.x402 keys:', Object.keys(body.x402));
+      if (body.x402.payment) {
+        console.log('📦 body.x402.payment keys:', Object.keys(body.x402.payment));
+      }
+    }
     try {
       const bodyKeys = Object.keys(body).filter(k => k !== 'x402' && k !== 'paymentPayload' && k !== 'payment');
       const hasMessage = Boolean(body.message);
@@ -213,6 +219,7 @@ app.post('/mint', async (req, res) => {
 
     // Accept multiple shapes for x402 fields (message.metadata, metadata, top-level keys)
     // Also handle Railway API explorer format which might send JSON strings
+    // x402scan sends: body.x402.payment.status and body.x402.payment.payload (or body.x402.payload)
     let paymentPayload: PaymentPayload | undefined;
     let payloadSource = '';
     const payloadCandidates: Array<[any, string]> = [
@@ -224,6 +231,9 @@ app.post('/mint', async (req, res) => {
       [body?.paymentPayload, 'body.paymentPayload'],
       [body?.payment?.payload, 'body.payment.payload'],
       [body?.x402?.payment?.payload, 'body.x402.payment.payload'],
+      [body?.x402?.paymentPayload, 'body.x402.paymentPayload'], // camelCase variant
+      [body?.x402?.payload, 'body.x402.payload'], // x402scan format
+      [body?.x402, 'body.x402'], // x402scan might send entire payload here
     ];
     
     // Try to parse JSON strings if found
@@ -236,7 +246,14 @@ app.post('/mint', async (req, res) => {
             paymentPayload = parsed as PaymentPayload;
             payloadSource = `${src} (parsed from JSON string)`;
             break;
-          } else {
+          } else if (typeof val === 'object') {
+            // Check if this object itself is a PaymentPayload (has scheme, network, payload)
+            if (val.scheme && val.network && (val.payload || val.paymentPayload)) {
+              paymentPayload = val as PaymentPayload;
+              payloadSource = `${src} (direct PaymentPayload)`;
+              break;
+            }
+            // Otherwise use as-is
             paymentPayload = val as PaymentPayload;
             payloadSource = src;
             break;
@@ -247,6 +264,16 @@ app.post('/mint', async (req, res) => {
           payloadSource = src;
           break;
         }
+      }
+    }
+    
+    // Special case: if body.x402 exists but payload wasn't found, check if body.x402 itself is the payload
+    // (x402scan might send: { x402: { scheme, network, payload: {...} } })
+    if (!paymentPayload && body.x402 && typeof body.x402 === 'object') {
+      if (body.x402.scheme && body.x402.network && (body.x402.payload || body.x402.paymentPayload)) {
+        paymentPayload = body.x402 as PaymentPayload;
+        payloadSource = 'body.x402 (detected as PaymentPayload)';
+        console.log('✅ Detected body.x402 as PaymentPayload structure');
       }
     }
     if (!paymentPayload) {
