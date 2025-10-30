@@ -175,17 +175,51 @@ app.post('/mint', async (req, res) => {
     // Allow empty body; unpaid requests should return 402 with Accepts
 
     // Accept multiple shapes for x402 fields (message.metadata, metadata, top-level keys)
-    let paymentPayload = (message?.metadata?.['x402.payment.payload'] ??
-      body?.metadata?.['x402.payment.payload'] ??
-      body?.['x402.payment.payload'] ??
-      body?.paymentPayload ??
-      body?.payment?.payload) as PaymentPayload | undefined;
+    let paymentPayload: PaymentPayload | undefined;
+    let payloadSource = '';
+    const payloadCandidates: Array<[any, string]> = [
+      [message?.metadata?.['x402.payment.payload'], 'message.metadata["x402.payment.payload"]'],
+      [body?.metadata?.['x402.payment.payload'], 'body.metadata["x402.payment.payload"]'],
+      [body?.['x402.payment.payload'], 'body["x402.payment.payload"]'],
+      [body?.paymentPayload, 'body.paymentPayload'],
+      [body?.payment?.payload, 'body.payment.payload'],
+    ];
+    for (const [val, src] of payloadCandidates) {
+      if (val) { paymentPayload = val as PaymentPayload; payloadSource = src; break; }
+    }
 
-    let paymentStatus = (message?.metadata?.['x402.payment.status'] ??
-      body?.metadata?.['x402.payment.status'] ??
-      body?.['x402.payment.status'] ??
-      body?.paymentStatus ??
-      body?.payment?.status) as string | undefined;
+    let paymentStatus: string | undefined;
+    let statusSource = '';
+    const statusCandidates: Array<[any, string]> = [
+      [message?.metadata?.['x402.payment.status'], 'message.metadata["x402.payment.status"]'],
+      [body?.metadata?.['x402.payment.status'], 'body.metadata["x402.payment.status"]'],
+      [body?.['x402.payment.status'], 'body["x402.payment.status"]'],
+      [body?.paymentStatus, 'body.paymentStatus'],
+      [body?.payment?.status, 'body.payment.status'],
+    ];
+    for (const [val, src] of statusCandidates) {
+      if (typeof val === 'string') { paymentStatus = val; statusSource = src; break; }
+    }
+
+    // Debug logging for incoming shapes (without leaking signature contents)
+    try {
+      const pp: any = paymentPayload as any;
+      const sig = pp?.payload?.signature as string | undefined;
+      const sigHint = sig ? `${sig.slice(0, 10)}…${sig.slice(-8)} (len=${sig.length})` : 'none';
+      console.log('🧾 x402 fields: status=%s (from %s), payloadFrom=%s', paymentStatus ?? 'undefined', statusSource || 'n/a', payloadSource || 'n/a');
+      if (pp) {
+        console.log(
+          '   payload: scheme=%s network=%s auth.from=%s to=%s value=%s validBefore=%s sig=%s',
+          pp?.scheme ?? pp?.payload?.scheme,
+          pp?.network,
+          pp?.payload?.authorization?.from,
+          pp?.payload?.authorization?.to,
+          pp?.payload?.authorization?.value,
+          pp?.payload?.authorization?.validBefore,
+          sigHint
+        );
+      }
+    } catch {}
 
     if (!paymentPayload || paymentStatus !== 'payment-submitted') {
       const paymentRequired = merchantExecutorMint.createPaymentRequiredResponse();
