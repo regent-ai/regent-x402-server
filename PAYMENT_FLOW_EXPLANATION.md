@@ -20,14 +20,14 @@ The x402 protocol uses **EIP-3009** (transferWithAuthorization), which is differ
 ### The Flow:
 
 ```
-1. Client → API: "Process my request"
+1. Client → API: "Mint my NFT" (POST /mint)
 2. API → Client: 402 Payment Required (with payment requirements)
 3. Client → Signs payment authorization (NO blockchain transaction yet)
 4. Client → API: "Here's my request with signed payment"
 5. API → Verifies signature is valid
 6. API → Blockchain: Calls transferWithAuthorization() directly ← ACTUAL TRANSACTION
-7. API → Processes request
-8. API → Client: Returns service response
+7. API → Mints NFT and settles payment
+8. API → Client: Returns mint + settlement response
 ```
 
 ## Current Test Behavior
@@ -61,18 +61,18 @@ The payment flow works as follows:
 1. Request without payment → returns 402 with payment requirements
 2. Request with payment → verifies signature locally
 3. If valid → settles payment via `transferWithAuthorization()` on USDC contract
-4. Then passes control to `ExampleService` to process the request
+4. Then the server mints via `MintService` before settling payment
 
 ## How to See Real Transactions
 
-To see actual blockchain transactions on Base Sepolia:
+To see actual blockchain transactions on Base mainnet:
 1. The API accepts the signed authorization
 2. Calls `transferWithAuthorization()` on the USDC contract directly
 3. Returns a transaction hash
 
-The transaction would show on Base Sepolia:
-- https://sepolia.basescan.org/address/0xf59B3Cd80021b77c43EA011356567095C4E45b0e (client)
-- https://sepolia.basescan.org/address/0x3B9b10B8a63B93Ae8F447A907FD1EF067153c4e5 (merchant)
+The transaction would show on Base mainnet:
+- https://basescan.org/address/0xf59B3Cd80021b77c43EA011356567095C4E45b0e (client)
+- https://basescan.org/address/0x3B9b10B8a63B93Ae8F447A907FD1EF067153c4e5 (merchant)
 
 ## Next Steps
 
@@ -86,12 +86,16 @@ Run the test with the server logs visible:
 
 **Terminal 1** (Server):
 ```bash
-npm run dev
+bun run dev
 ```
 
 **Terminal 2** (Test):
 ```bash
-npm test
+# Option A: Basic 402 check
+./test-request.sh
+
+# Option B: End-to-end using the test client (after build)
+bun run build && node dist/testClient.js
 ```
 
 Watch for:
@@ -101,7 +105,7 @@ Watch for:
 
 If you see a transaction hash, check it on BaseScan:
 ```
-https://sepolia.basescan.org/tx/[TRANSACTION_HASH]
+https://basescan.org/tx/[TRANSACTION_HASH]
 ```
 
 ## Understanding the Test Output

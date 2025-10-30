@@ -92,6 +92,10 @@ function main(): void {
   const imagePathPrefix = getOptionalEnv("IMAGE_PATH_PREFIX", ""); // e.g., "previews"
   const imageExt = getOptionalEnv("IMAGE_EXT", "webp");
   const padJsonFilenames = getOptionalEnv("PAD_TO_THREE_JSON", "true").toLowerCase() !== "false";
+  const metadataDescription = getOptionalEnv(
+    "METADATA_DESCRIPTION",
+    "Interactive Comet-style shader card."
+  );
 
   ensureDir(outDir);
 
@@ -104,7 +108,7 @@ function main(): void {
 
     const metadata: Record<string, unknown> = {
       name: `Regent Animata #${id}`,
-      description: "Interactive Comet-style shader card.",
+      description: metadataDescription,
       animation_url: `ipfs://${bundleCid}/token.html?id=${id}`,
       attributes: [
         { trait_type: "Hue 1", value: H[0], display_type: "number" },

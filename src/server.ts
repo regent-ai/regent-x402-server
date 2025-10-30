@@ -29,7 +29,7 @@ app.use(express.json());
 // Configuration
 const PORT = process.env.PORT || 3000;
 const PAY_TO_ADDRESS = process.env.PAY_TO_ADDRESS;
-const NETWORK = process.env.NETWORK || 'base-sepolia';
+const NETWORK = process.env.NETWORK || 'base';
 const FACILITATOR_URL = process.env.FACILITATOR_URL;
 const FACILITATOR_API_KEY = process.env.FACILITATOR_API_KEY;
 const SERVICE_URL_MINT =
@@ -163,7 +163,7 @@ app.get('/health', (req, res) => {
       network: NETWORK,
       mint: {
         resource: '/mint',
-        price: '$80.00',
+        price: `$80.00`,
       },
     },
   });
@@ -175,8 +175,20 @@ app.get('/health', (req, res) => {
 app.post('/mint', async (req, res) => {
   try {
     console.log('\n📥 Received /mint request');
-    const body = req.body || {};
-    const { message } = body;
+    const raw = req.body;
+    console.log('   headers content-type=%s body.type=%s', req.headers['content-type'] || 'n/a', typeof raw);
+    let body: any = raw;
+    if (typeof raw === 'string') {
+      try {
+        body = JSON.parse(raw);
+        console.log('   parsed string body as JSON');
+      } catch {
+        console.log('   failed to parse string body as JSON');
+        body = {};
+      }
+    }
+    body = body || {};
+    const { message } = body as any;
     // Allow empty body; unpaid requests should return 402 with Accepts
 
     // Accept multiple shapes for x402 fields (message.metadata, metadata, top-level keys)
@@ -283,11 +295,30 @@ app.post('/mint', async (req, res) => {
       });
     }
 
-    // Record mint usage and idempotency as soon as mint succeeds
+    // Record mint usage (NFT was delivered)
     const newCount = incMintCount(payer, 1);
-    markPaymentProcessed(paymentId);
 
+    // Settle payment BEFORE marking as processed (allows retry if settlement fails)
     const settlement = await merchantExecutorMint.settlePayment(paymentPayload);
+    
+    if (!settlement.success) {
+      // Mint succeeded but settlement failed - don't mark payment as processed to allow retry
+      console.error(`⚠️ Mint succeeded but settlement failed: ${settlement.errorReason}`);
+      return res.status(500).json({
+        error: 'settlement-failed',
+        mintSucceeded: true,
+        paymentSettled: false,
+        payer,
+        mintTxHash: mint.transactionHash,
+        tokenUri: mint.tokenUri,
+        settlement,
+        errorReason: settlement.errorReason,
+        remainingMints: perAddressLimit == null ? null : Math.max(0, perAddressLimit - newCount),
+      });
+    }
+
+    // Only mark payment as processed after successful settlement
+    markPaymentProcessed(paymentId);
     console.log('📤 Mint + settlement completed');
 
     return res.json({

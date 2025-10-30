@@ -30,6 +30,7 @@ Metadata generator (IPFS)
   - `BUNDLE_CID` (required): CID containing `token.html`
   - `IMAGE_CID` (optional): CID with previews (`001.webp…999.webp`). If omitted and no `STATIC_IMAGE_URL`, the `image` field is omitted entirely.
   - `STATIC_IMAGE_URL` (optional): Single image for all tokens (e.g., `ipfs://$BUNDLE_CID/public/regentlogo.svg`). Skips previews.
+  - `METADATA_DESCRIPTION` (optional): overrides the description string for all tokens
   - Optional: `IMAGE_PATH_PREFIX` (e.g., `previews` if your files live under a subfolder), `IMAGE_EXT` (default `webp`), `OUT_DIR` (default `deploy/metadata`), `PAD_TO_THREE_JSON` (default `true`)
 - Run:
   - `bun scripts/gen-metadata.ts` (after exporting env vars)

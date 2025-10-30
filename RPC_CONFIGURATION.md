@@ -177,17 +177,27 @@ The agent currently uses:
 
 **File: src/server.ts**
 ```typescript
-const merchantOptions = {
+const merchantOptionsMint = {
   payToAddress: PAY_TO_ADDRESS,
   network: resolvedNetwork,
-  price: 0.1,
+  price: 80,
   facilitatorUrl: FACILITATOR_URL,
   facilitatorApiKey: FACILITATOR_API_KEY,
+  resourceUrl: SERVICE_URL_MINT,
+  settlementMode,
+  rpcUrl: RPC_URL,
+  privateKey: PRIVATE_KEY,
+  assetAddress: ASSET_ADDRESS,
+  assetName: ASSET_NAME,
+  explorerUrl: EXPLORER_URL,
+  chainId: CHAIN_ID,
 };
 
-const merchantExecutor = new MerchantExecutor(merchantOptions);
+const merchantExecutorMint = new MerchantExecutor(merchantOptionsMint);
 
-if (FACILITATOR_URL) {
+if (settlementMode === 'direct') {
+  console.log('🧩 Using local settlement (direct EIP-3009 via RPC)');
+} else if (FACILITATOR_URL) {
   console.log(`🌐 Using custom facilitator: ${FACILITATOR_URL}`);
 } else {
   console.log('🌐 Using default facilitator: https://x402.org/facilitator');
@@ -265,6 +275,6 @@ ASSET_ADDRESS=0xTokenAddress
 ASSET_NAME=USDC
 EXPLORER_URL=https://explorer.your-network.org
 
-# Optional - ensure payment requirements include a fully-qualified endpoint URL
-SERVICE_URL=https://your-domain.com/process
+# Optional - ensure payment requirements include a fully-qualified endpoint URL for the mint resource
+SERVICE_URL_MINT=https://your-domain.com/mint
 ```

@@ -16,10 +16,10 @@ echo ""
 # Test 2: Simple request (should return 402 Payment Required)
 echo ""
 echo "2️⃣ Testing payment required flow..."
-echo "Sending request to /process endpoint..."
+echo "Sending request to /mint endpoint..."
 echo ""
 
-curl -X POST "${HOST}/process" \
+curl -X POST "${HOST}/mint" \
   -H "Content-Type: application/json" \
   -d '{
     "message": {
@@ -35,5 +35,5 @@ curl -X POST "${HOST}/process" \
 echo ""
 echo "✅ Test complete!"
 echo ""
-echo "Expected: 402 Payment Required response with x402 payment details"
+echo "Expected: 402 Payment Required response with x402 payment details (accepts array)"
 echo "To complete the payment, you need to use an x402-compatible client"

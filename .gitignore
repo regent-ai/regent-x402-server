@@ -26,3 +26,7 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Docs (non-canonical)
+CLAUDE.md
+TODO.md

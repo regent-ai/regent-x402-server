@@ -130,7 +130,7 @@ export class TestClient {
 
     console.log(`\n📤 Sending request: "${text}"`);
 
-    const response = await fetch(`${this.agentUrl}/process`, {
+    const response = await fetch(`${this.agentUrl}/mint`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -140,20 +140,12 @@ export class TestClient {
 
     const data = await response.json() as any;
 
-    // Check for A2A-style payment requirement in task metadata
-    if (data.task?.status?.message?.metadata?.['x402.payment.required']) {
-      console.log('💳 Payment required (A2A style)!');
-      return {
-        error: 'Payment Required',
-        x402: data.task.status.message.metadata['x402.payment.required'],
-        task: data.task
-      };
-    }
-
-    // Check for HTTP 402 style (legacy)
+    // Check for HTTP 402: server returns the paymentRequired object directly
     if (response.status === 402) {
-      console.log('💳 Payment required (HTTP 402)!');
-      return { error: 'Payment Required', x402: data.x402 };
+      console.log('💳 Payment required!');
+      // Support both shapes: direct paymentRequired or wrapped { required }
+      const x402 = data?.accepts ? data : (data?.required?.accepts ? data.required : data);
+      return { error: 'Payment Required', x402 };
     }
 
     return data as AgentResponse;
@@ -191,7 +183,7 @@ export class TestClient {
 
       console.log(`Payment payload created for ${paymentPayload.network}`);
 
-      // Step 3: Submit payment with original message
+    // Step 3: Submit payment with original message
       console.log('\n=== STEP 3: Submitting Payment ===');
 
       // Use the taskId and contextId from the initial response if available
@@ -214,7 +206,7 @@ export class TestClient {
         },
       };
 
-      const paidResponse = await fetch(`${this.agentUrl}/process`, {
+      const paidResponse = await fetch(`${this.agentUrl}/mint`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -254,7 +246,8 @@ export class TestClient {
       console.log(`   Service: ${data.service}`);
       console.log(`   Payment address: ${data.payment.address}`);
       console.log(`   Network: ${data.payment.network}`);
-      console.log(`   Price: ${data.payment.price}`);
+      const price = data.payment?.mint?.price ?? data.payment?.price;
+      if (price) console.log(`   Mint price: ${price}`);
     } else {
       console.log('❌ Agent is not healthy');
     }

@@ -59,13 +59,13 @@ PAY_TO_ADDRESS=0xYourWalletAddress
 
 # Network Configuration
 # Options: "base", "base-sepolia", "ethereum", "polygon", "polygon-amoy"
-NETWORK=base-sepolia
+NETWORK=base
 
 # Mint Configuration
 # Base RPC endpoint (e.g., https://sepolia.base.org)
 MINT_RPC_URL=
-# Chain ID: 84532 (Base Sepolia) or 8453 (Base)
-MINT_CHAIN_ID=84532
+# Chain ID: 8453 (Base) or 84532 (Base Sepolia)
+MINT_CHAIN_ID=8453
 # Private key for the mint signer (DO NOT COMMIT)
 MINT_SIGNER_PRIVATE_KEY=
 # NFT contract to call
@@ -273,7 +273,7 @@ Compiled files will be in the `dist/` directory.
 ### Cleaning
 
 ```bash
-npm run clean
+bun run clean
 ```
 
 ## Testing with Real Payments
@@ -304,7 +304,7 @@ Make sure you've set `PAY_TO_ADDRESS` in your `.env` file to your wallet address
 
 - Check that you're using the correct network
 - Verify your wallet has USDC approval set
-- Make sure the payment amount matches ($0.10)
+- Make sure the payment amount matches ($80.00)
 - If signature verification fails, review the logged invalid reason and confirm the client signed the latest payment requirements
 - For facilitator settlement errors, confirm the facilitator is reachable and that any `FACILITATOR_URL` / `FACILITATOR_API_KEY` settings are correct
 - For local settlement errors, ensure your `PRIVATE_KEY` has gas and that the configured `RPC_URL` (or the network default) is responsive
@@ -344,4 +344,4 @@ ISC
 
 ## NFT Mint Workflow (Whitelist)
 
-This server includes a planned paid endpoint `POST /mint` that mints an NFT to the payer address only if that address is present in `WLaddress.txt` (one address per line). See `AGENTS.md` for implementation notes and operational guidance.
+This server includes an implemented paid endpoint `POST /mint` that mints an NFT to the payer address only if that address is present in `WLaddress.txt` (one address per line). See `AGENTS.md` for implementation details and operational guidance.

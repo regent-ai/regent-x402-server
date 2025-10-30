@@ -17,15 +17,17 @@ Key files:
 
 - `src/server.ts` – Express server, routes, x402 verification/settlement flow
 - `src/MerchantExecutor.ts` – Payment requirements, verify, settlement
-- `src/ExampleService.ts` – Example service invoked after payment verification
+- `src/MintService.ts` – On-chain NFT mint helper
 - `src/x402Types.ts` – A2A-like task/message shapes
+- `src/whitelist.ts` – Whitelist loader (TTL-cached)
+- `src/config.ts` – Runtime config (server-config.json with TTL)
+- `src/store.ts` – Idempotency and per-address mint counts (JSON file store)
 - `WLaddress.txt` – Whitelist for NFT mint (one address per line; see below)
 
 ### Endpoints
 
 - `GET /health` – Service health and payment summary
-- `POST /process` – Example paid endpoint (AI text) with x402 handshake
-- Planned: `POST /mint` – NFT mint endpoint, paid via x402; mints to the payer address only if the address is whitelisted in `WLaddress.txt`
+- `POST /mint` – Paid NFT mint endpoint (x402). Verifies payment, checks whitelist, mints to payer, then settles payment.
 
 ## NFT Mint Workflow (Whitelist-gated)
 
@@ -78,7 +80,7 @@ Add the following server‑only variables to `.env` for the mint flow (names are
   - **Base URI:** `ipfs://bafybeihzetxfwhlem6hro66wngw4fabudmvxwv567p3gzmk5vs64cdvuyq/`
 - `NFT_ABI_PATH` – Optional path to a minimal ABI JSON if your method isn’t standard
 - `MINT_METHOD` – Method to call, e.g., `safeMint` or `mint`
-- `MINT_PRICE_USD` – Price for the mint endpoint (e.g., `0.01`)
+  (Price is fixed at $80 USDC for `/mint`.)
 - Optional metadata:
   - `MINT_TOKEN_URI` – Static token URI (if your contract requires it)
   - or PINATA/IPFS keys if you dynamically upload metadata before mint
@@ -98,14 +100,14 @@ This guide is agnostic to the NFT contract so long as it exposes a method to min
 
 Choose the method via `MINT_METHOD` and pass arguments accordingly in your implementation. Keep a minimal ABI (only the method(s) you call) to reduce surface area.
 
-### Implementation sketch (server)
+### Implementation details (server)
 
-Add a new paid endpoint and a separate `MerchantExecutor` instance for `/mint` to allow an independent `resource` and `price`:
+Paid endpoint uses a dedicated `MerchantExecutor` instance for `/mint` to allow an independent `resource` and `price`:
 
-1) Instantiate `merchantExecutorMint` with:
+1) `merchantExecutorMint` is instantiated with:
    - `resourceUrl`: `SERVICE_URL_MINT` (e.g., `http://localhost:3000/mint`)
-   - `price`: `Number(process.env.MINT_PRICE_USD || 0.01)`
-   - Same network/asset parameters as the main executor
+   - `price`: `80`
+   - Network/asset parameters from built-ins or env
 
 2) In `POST /mint`:
    - Parse `message` and x402 metadata (same shape as `/process`).
@@ -167,6 +169,11 @@ With payment:
 - [ ] Address gating denies non‑WL addresses (403)
 - [ ] Successful mint returns mint tx hash
 - [ ] Settlement includes facilitator/direct receipt
+
+### Dev commands (bun)
+
+- Build: `bun run build`
+- Dev (compile + run): `bun run dev`
 
 ### Runtime updates (no redeploy)
 
